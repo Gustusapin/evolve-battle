@@ -1,175 +1,110 @@
 "use client";
 
-// ============================================================================
-// LogActivityModal — formulário para registrar uma nova atividade ou hábito.
-// Calcula uma prévia de pontos no cliente (a fonte de verdade é o trigger SQL,
-// isso é só feedback visual instantâneo antes de salvar).
-// ============================================================================
-import { useState, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { X } from "lucide-react";
-import { Button } from "@/components/ui/Button";
-import { createClient } from "@/lib/supabase/client";
+import { useState } from "react";
+import { ActivityType, UNIT_LABELS } from "@/types/database";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils/cn";
-import type { ActivityType } from "@/types/database";
 
 interface LogActivityModalProps {
   isOpen: boolean;
   onClose: () => void;
   activityTypes: ActivityType[];
-  userId: string;
-  onSuccess: () => void;
+  onSubmit: (activityTypeId: string, quantity: number) => Promise<void>;
 }
 
-export function LogActivityModal({
-  isOpen,
-  onClose,
-  activityTypes,
-  userId,
-  onSuccess,
-}: LogActivityModalProps) {
-  const [selectedTypeId, setSelectedTypeId] = useState<string>(activityTypes[0]?.id ?? "");
+export function LogActivityModal({ isOpen, onClose, activityTypes, onSubmit }: LogActivityModalProps) {
+  const [selectedTypeId, setSelectedTypeId] = useState<string>("");
   const [quantity, setQuantity] = useState<string>("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  if (!isOpen) return null;
 
   const selectedType = activityTypes.find((t) => t.id === selectedTypeId);
+  const estimatedPoints = selectedType ? Number(quantity) * selectedType.points_per_unit : 0;
 
-  const estimatedPoints = useMemo(() => {
-    const qty = parseFloat(quantity);
-    if (!selectedType || isNaN(qty) || qty <= 0) return 0;
-    return qty * selectedType.points_per_unit;
-  }, [quantity, selectedType]);
-
-  async function handleSubmit(e: React.FormEvent) {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const qty = parseFloat(quantity);
-    if (!selectedType || isNaN(qty) || qty <= 0) {
-      setError("Informe uma quantidade válida.");
-      return;
+    if (!selectedTypeId || !quantity) return;
+
+    setIsLoading(true);
+    try {
+      await onSubmit(selectedTypeId, Number(quantity));
+      
+      // Notificação de Sucesso com Sonner
+      toast.success(`Atividade registrada! +${estimatedPoints.toFixed(1)} XP`, {
+        description: "Continue assim para evoluir de nível.",
+        icon: "🚀"
+      });
+      
+      setQuantity("");
+      setSelectedTypeId("");
+      onClose();
+    } catch (error) {
+      toast.error("Erro ao registrar atividade.");
+    } finally {
+      setIsLoading(false);
     }
-
-    setSubmitting(true);
-    setError(null);
-
-    const supabase = createClient();
-    const { error: insertError } = await supabase.from("activity_logs").insert({
-      user_id: userId,
-      activity_type_id: selectedType.id,
-      quantity: qty,
-    });
-
-    setSubmitting(false);
-
-    if (insertError) {
-      setError("Não foi possível salvar. Tente novamente.");
-      return;
-    }
-
-    setQuantity("");
-    onSuccess();
-    onClose();
-  }
+  };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <motion.div
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 overflow-y-auto"
-            onClick={onClose}
-          >
-            <motion.div
-              className="w-full sm:max-w-md my-auto"
-              initial={{ opacity: 0, y: 24, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 24, scale: 0.97 }}
-              transition={{ type: "spring", stiffness: 260, damping: 24 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="glass-card p-6 bg-base-900/95 max-h-[85vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-5">
-                  <h2 className="font-display font-semibold text-lg">Registrar atividade</h2>
-                  <button
-                    onClick={onClose}
-                    className="text-ink-muted hover:text-ink-primary transition-colors"
-                    aria-label="Fechar"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="glass-card w-full max-w-md p-6 relative bg-[#0a0a0a]">
+        <button onClick={onClose} className="absolute top-4 right-4 text-zinc-500 hover:text-white">
+          ✕
+        </button>
+        <h2 className="text-xl font-bold mb-6 text-white">Registrar Atividade</h2>
 
-                <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-                  {/* Seletor de tipo de atividade */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {activityTypes.map((type) => (
-                      <button
-                        key={type.id}
-                        type="button"
-                        onClick={() => setSelectedTypeId(type.id)}
-                        className={cn(
-                          "flex flex-col items-center gap-1 p-3 rounded-soft border transition-all text-xs",
-                          selectedTypeId === type.id
-                            ? "border-player1 bg-player1/10 text-player1"
-                            : "border-white/10 text-ink-secondary hover:border-white/20"
-                        )}
-                      >
-                        <span className="text-xl">{type.icon}</span>
-                        <span className="truncate w-full text-center">{type.name}</span>
-                      </button>
-                    ))}
-                  </div>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid grid-cols-3 gap-3">
+            {activityTypes.map((type) => (
+              <button
+                key={type.id}
+                type="button"
+                onClick={() => setSelectedTypeId(type.id)}
+                className={cn(
+                  "p-3 rounded-xl border flex flex-col items-center gap-2 transition-all",
+                  selectedTypeId === type.id 
+                    ? "border-purple-500 bg-purple-500/10 text-white" 
+                    : "border-white/10 bg-white/5 text-zinc-400 hover:border-white/20 hover:bg-white/10"
+                )}
+              >
+                <span className="text-2xl">{type.icon}</span>
+                <span className="text-[10px] font-medium uppercase tracking-wider">{type.name}</span>
+              </button>
+            ))}
+          </div>
 
-                  {/* Input de quantidade */}
-                  <div>
-                    <label htmlFor="quantity" className="text-xs text-ink-secondary block mb-1.5">
-                      Quantidade {selectedType && `(${selectedType.unit})`}
-                    </label>
-                    <input
-                      id="quantity"
-                      type="number"
-                      inputMode="decimal"
-                      step="0.1"
-                      min="0"
-                      autoFocus
-                      value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
-                      placeholder="Ex: 30"
-                      className="w-full bg-base-800 border border-white/10 rounded-soft px-4 py-3 text-ink-primary placeholder:text-ink-muted focus:border-player1 outline-none transition-colors font-mono"
-                    />
-                  </div>
-
-                  {/* Prévia de pontos */}
-                  <div className="flex items-center justify-between px-4 py-3 rounded-soft bg-base-800/50">
-                    <span className="text-xs text-ink-secondary">Pontos estimados</span>
-                    <motion.span
-                      key={estimatedPoints}
-                      initial={{ scale: 1 }}
-                      animate={{ scale: [1, 1.1, 1] }}
-                      className="font-mono font-semibold text-player2"
-                    >
-                      +{estimatedPoints.toFixed(1)}
-                    </motion.span>
-                  </div>
-
-                  {error && <p className="text-alert text-xs">{error}</p>}
-
-                  <Button type="submit" fullWidth disabled={submitting}>
-                    {submitting ? "Salvando..." : "Confirmar registro"}
-                  </Button>
-                </form>
+          {selectedType && (
+            <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2">
+              <label className="text-sm font-medium text-zinc-400">
+                Quantidade ({UNIT_LABELS[selectedType.unit]})
+              </label>
+              <input
+                type="number"
+                step={selectedType.unit === "ml" ? "10" : "0.1"}
+                min="0"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder={selectedType.unit === "ml" ? "Ex: 250" : "Ex: 30"}
+                className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-white focus:border-purple-500 focus:outline-none"
+                autoFocus
+              />
+              <div className="flex justify-between items-center mt-4 p-4 rounded-xl bg-purple-500/10 border border-purple-500/20">
+                <span className="text-sm text-purple-200">Pontos estimados</span>
+                <span className="font-mono font-bold text-purple-400">+{estimatedPoints.toFixed(1)} XP</span>
               </div>
-            </motion.div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={!selectedType || !quantity || isLoading}
+            className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:hover:bg-purple-600 text-white font-bold py-3 px-4 rounded-xl transition-colors"
+          >
+            {isLoading ? "Registrando..." : "Confirmar registro"}
+          </button>
+        </form>
+      </div>
+    </div>
   );
 }

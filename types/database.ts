@@ -4,12 +4,15 @@
 // ============================================================================
 
 export type ActivityCategory = "exercicio" | "habito";
-export type UnitType = "minutos" | "km" | "paginas" | "litros" | "repeticoes";
+// Removido "litros" e adicionado "ml"
+export type UnitType = "minutos" | "km" | "paginas" | "ml" | "repeticoes"; 
 
 export interface Profile {
   id: string;
   username: string;
   avatar_emoji: string;
+  avatar_url?: string | null;       // <-- NOVA COLUNA (Avatar)
+  quote_of_the_day?: string | null; // <-- NOVA COLUNA (Frase do dia)
   total_points: number;
   current_level: number;
   current_streak: number;
@@ -56,6 +59,6 @@ export const UNIT_LABELS: Record<UnitType, string> = {
   minutos: "min",
   km: "km",
   paginas: "pág.",
-  litros: "L",
+  ml: "mL", // <-- ATUALIZADO AQUI TAMBÉM
   repeticoes: "reps",
 };
