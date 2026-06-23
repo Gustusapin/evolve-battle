@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils/cn";
-import { toast } from "sonner"; // Importação do Toast
+import { toast } from "sonner";
+import { getLevelProgress } from "@/lib/utils/leveling";
 import type { ActivityType } from "@/types/database";
 
 interface LogActivityModalProps {
@@ -39,140 +40,88 @@ export function LogActivityModal({
     e.preventDefault();
     const qty = parseFloat(quantity);
     
-    if (!selectedType || isNaN(qty) || qty <= 0) {
-      toast.error("Informe uma quantidade válida.");
-      return;
-    }
+    if (!selectedType || isNaN(qty) || qty <= 0) return;
 
     setSubmitting(true);
-
     const supabase = createClient();
+
+    // 1. Pega o XP atual ANTES de salvar
+    const { data: profileBefore } = await supabase.from("profiles").select("total_points").eq("id", userId).single();
+    const oldLevel = getLevelProgress(profileBefore?.total_points || 0).level;
+
+    // 2. Salva a atividade
     const { error: insertError } = await supabase.from("activity_logs").insert({
       user_id: userId,
       activity_type_id: selectedType.id,
       quantity: qty,
     });
 
-    setSubmitting(false);
-
     if (insertError) {
-      toast.error("Não foi possível salvar. Tente novamente.");
+      toast.error("Erro ao salvar atividade.");
+      setSubmitting(false);
       return;
     }
 
-    // Dispara a notificação de sucesso!
-    toast.success(`Atividade registrada! +${estimatedPoints.toFixed(1)} XP`, {
-      description: "Continue assim para evoluir de nível.",
-      icon: "🚀"
-    });
+    // 3. Pega o XP novo DEPOIS de salvar
+    const { data: profileAfter } = await supabase.from("profiles").select("total_points").eq("id", userId).single();
+    const newLevel = getLevelProgress(profileAfter?.total_points || 0).level;
+
+    // 4. Lógica do Pop-up (Toast)
+    if (newLevel > oldLevel) {
+      toast.success(`LEVEL UP! 🎉`, {
+        description: `Parabéns! Você alcançou o nível ${newLevel}.`,
+        duration: 6000,
+      });
+    } else {
+      toast.success(`+${estimatedPoints.toFixed(1)} XP adicionados!`);
+    }
 
     setQuantity("");
     onSuccess();
     onClose();
+    setSubmitting(false);
   }
 
   return (
     <AnimatePresence>
       {isOpen && (
         <>
-          <motion.div
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <motion.div
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 overflow-y-auto"
-            onClick={onClose}
-          >
-            <motion.div
-              className="w-full sm:max-w-md my-auto"
-              initial={{ opacity: 0, y: 24, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 24, scale: 0.97 }}
-              transition={{ type: "spring", stiffness: 260, damping: 24 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Ajustado para o estilo escuro (glassmorphism) */}
-              <div className="glass-card p-6 relative bg-[#0a0a0a]">
-                <div className="flex items-center justify-between mb-5">
-                  <h2 className="text-xl font-bold text-white">Registrar atividade</h2>
-                  <button
-                    onClick={onClose}
-                    className="text-zinc-500 hover:text-white transition-colors"
-                    aria-label="Fechar"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+          <motion.div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={onClose} />
+          <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="glass-card w-full max-w-md p-6 relative bg-[#0a0a0a]" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-xl font-bold text-white">Registrar atividade</h2>
+                <button onClick={onClose} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+                <div className="grid grid-cols-3 gap-3">
+                  {activityTypes.map((type) => (
+                    <button
+                      key={type.id}
+                      type="button"
+                      onClick={() => setSelectedTypeId(type.id)}
+                      className={cn("p-3 rounded-xl border flex flex-col items-center gap-2", selectedTypeId === type.id ? "border-purple-500 bg-purple-500/10" : "border-white/10")}
+                    >
+                      <span className="text-2xl">{type.icon}</span>
+                      <span className="text-[10px] uppercase truncate w-full text-center">{type.name}</span>
+                    </button>
+                  ))}
                 </div>
 
-                <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-                  {/* Seletor de tipo de atividade */}
-                  <div className="grid grid-cols-3 gap-3">
-                    {activityTypes.map((type) => (
-                      <button
-                        key={type.id}
-                        type="button"
-                        onClick={() => setSelectedTypeId(type.id)}
-                        className={cn(
-                          "p-3 rounded-xl border flex flex-col items-center gap-2 transition-all",
-                          selectedTypeId === type.id
-                            ? "border-purple-500 bg-purple-500/10 text-white"
-                            : "border-white/10 bg-white/5 text-zinc-400 hover:border-white/20 hover:bg-white/10"
-                        )}
-                      >
-                        <span className="text-2xl">{type.icon}</span>
-                        <span className="text-[10px] font-medium uppercase tracking-wider truncate w-full text-center">
-                          {type.name}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                <input
+                  type="number"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  placeholder="Quantidade..."
+                  className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-white focus:border-purple-500 outline-none"
+                />
 
-                  {/* Input de quantidade (Ajustado para o mL dinâmico) */}
-                  <div className="animate-in fade-in slide-in-from-bottom-2">
-                    <label htmlFor="quantity" className="text-sm font-medium text-zinc-400 block mb-2">
-                      Quantidade {selectedType && `(${selectedType.unit})`}
-                    </label>
-                    <input
-                      id="quantity"
-                      type="number"
-                      inputMode="decimal"
-                      step={selectedType?.unit === "ml" ? "10" : "0.1"}
-                      min="0"
-                      autoFocus
-                      value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
-                      placeholder={selectedType?.unit === "ml" ? "Ex: 250" : "Ex: 30"}
-                      className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-zinc-600 focus:border-purple-500 focus:outline-none transition-colors font-mono"
-                    />
-                  </div>
-
-                  {/* Prévia de pontos */}
-                  <div className="flex items-center justify-between px-4 py-4 rounded-xl bg-purple-500/10 border border-purple-500/20">
-                    <span className="text-sm text-purple-200">Pontos estimados</span>
-                    <motion.span
-                      key={estimatedPoints}
-                      initial={{ scale: 1 }}
-                      animate={{ scale: [1, 1.1, 1] }}
-                      className="font-mono font-bold text-purple-400"
-                    >
-                      +{estimatedPoints.toFixed(1)} XP
-                    </motion.span>
-                  </div>
-
-                  {/* Botão de Envio */}
-                  <button
-                    type="submit"
-                    disabled={!selectedType || !quantity || submitting}
-                    className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:hover:bg-purple-600 text-white font-bold py-3 px-4 rounded-xl transition-colors"
-                  >
-                    {submitting ? "Salvando..." : "Confirmar registro"}
-                  </button>
-                </form>
-              </div>
-            </motion.div>
+                <button type="submit" disabled={submitting} className="w-full bg-purple-600 py-3 rounded-xl font-bold text-white">
+                  {submitting ? "Salvando..." : "Confirmar"}
+                </button>
+              </form>
+            </div>
           </motion.div>
         </>
       )}
